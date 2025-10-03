@@ -1,32 +1,48 @@
-
-
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 import os
 import uuid
-import glob
 from datetime import datetime
 from app.audio_processor import AudioProcessor
-from app.models import AnalysisResponse
 import supabase
 from dotenv import load_dotenv
-import json
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
-app = FastAPI(title="Audio Pattern Detection API")
-
-# Supabase client
-supabase_client = supabase.create_client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+app = FastAPI(
+    title="Audio Pattern Detection API",
+    description="Industry-grade audio pattern detection using cross-correlation analysis",
+    version="1.0.0"
 )
 
-# CORS Configuration
+# Get environment
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+PORT = int(os.getenv("PORT", 8000))
+
+# Supabase client initialization
+try:
+    supabase_client = supabase.create_client(
+        os.getenv("SUPABASE_URL"),
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    )
+    logger.info("✅ Supabase client initialized successfully")
+except Exception as e:
+    logger.error(f"❌ Failed to initialize Supabase client: {e}")
+    supabase_client = None
+
+# CORS Configuration - get from environment
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+logger.info(f"🔄 CORS origins: {CORS_ORIGINS}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://10.154.161.160:3000"],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -42,37 +58,47 @@ processor = AudioProcessor()
 
 @app.get("/")
 async def root():
-    return {"message": "Audio Pattern Detection API", "status": "running"}
+    return {
+        "message": "Audio Pattern Detection API", 
+        "status": "running",
+        "environment": ENVIRONMENT,
+        "version": "1.0.0"
+    }
 
-@app.post("/api/analyze", response_model=AnalysisResponse)
+@app.post("/api/analyze")
 async def analyze_audio(
     pattern: UploadFile = File(...),
     target: UploadFile = File(...),
-    user_id: str = Form(...)  # FIX: Use Form instead of query param
+    user_id: str = Form(...)
 ):
-    """
-    Analyze audio files for pattern detection and store in Supabase
-    """
-    print(f"🎵 Received files: Pattern={pattern.filename}, Target={target.filename}, User={user_id}")
+    """Analyze audio files for pattern detection"""
+    logger.info(f"🎵 Received analysis request from user: {user_id}")
     
     if not user_id or user_id == "None":
         raise HTTPException(status_code=400, detail="User ID is required")
+    
+    # Validate file types
+    allowed_extensions = {'.mp3', '.wav', '.ogg', '.m4a', '.aac', '.flac'}
+    pattern_ext = os.path.splitext(pattern.filename)[1].lower()
+    target_ext = os.path.splitext(target.filename)[1].lower()
+    
+    if pattern_ext not in allowed_extensions or target_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Unsupported file format")
+    
+    # Validate file size (50MB max)
+    max_size = 50 * 1024 * 1024
+    if pattern.size > max_size or target.size > max_size:
+        raise HTTPException(status_code=400, detail="File size too large. Maximum 50MB per file.")
     
     pattern_path = None
     target_path = None
     
     try:
-        # Generate unique ID for this analysis
         analysis_id = str(uuid.uuid4())
         
-        # Save uploaded files temporarily
-        pattern_ext = os.path.splitext(pattern.filename)[1] or '.wav'
-        target_ext = os.path.splitext(target.filename)[1] or '.wav'
-        
+        # Save files temporarily
         pattern_path = os.path.join(UPLOAD_DIR, f"{analysis_id}_pattern{pattern_ext}")
         target_path = os.path.join(UPLOAD_DIR, f"{analysis_id}_target{target_ext}")
-        
-        print(f"💾 Saving temporary files...")
         
         # Save uploaded files
         with open(pattern_path, "wb") as buffer:
@@ -83,60 +109,64 @@ async def analyze_audio(
             content = await target.read()
             buffer.write(content)
         
-        print("🔍 Starting audio processing...")
         # Process audio
+        logger.info("🔍 Starting audio processing...")
         results = processor.detect_pattern(pattern_path, target_path)
-        print(f"✅ Processing complete. Found {results['detection_count']} detections")
+        logger.info(f"✅ Processing complete. Found {results['detection_count']} detections")
         
-        # Upload files to Supabase Storage
-        print("☁️ Uploading to Supabase Storage...")
-        
-        # Upload pattern file
-        with open(pattern_path, "rb") as pattern_file:
-            pattern_data = pattern_file.read()
-            pattern_storage_path = f"{user_id}/{analysis_id}_pattern{pattern_ext}"
-            supabase_client.storage.from_("audio-analysis-files").upload(
-                pattern_storage_path,
-                pattern_data
-            )
-            pattern_url = supabase_client.storage.from_("audio-analysis-files").get_public_url(pattern_storage_path)
-        
-        # Upload target file
-        with open(target_path, "rb") as target_file:
-            target_data = target_file.read()
-            target_storage_path = f"{user_id}/{analysis_id}_target{target_ext}"
-            supabase_client.storage.from_("audio-analysis-files").upload(
-                target_storage_path,
-                target_data
-            )
-            target_url = supabase_client.storage.from_("audio-analysis-files").get_public_url(target_storage_path)
-        
-        # Store analysis in Supabase Database
-        print("💾 Saving analysis to database...")
-        analysis_data = {
-            "user_id": user_id,
-            "analysis_id": analysis_id,
-            "pattern_filename": pattern.filename,
-            "target_filename": target.filename,
-            "pattern_url": pattern_url,
-            "target_url": target_url,
-            "detection_count": results["detection_count"],
-            "detections": results["detections"],
-            "pattern_duration": results["pattern_duration"],
-            "target_duration": results["target_duration"],
-            "sample_rate": results["sample_rate"],
-            "waveform_data": results["waveform_data"],
-            "correlation_data": results["correlation_data"],
-            "analysis_methods": results.get("analysis_methods", ["correlation"])
-        }
-        
-        db_response = supabase_client.table("audio_analysis").insert(analysis_data).execute()
-        
-        if hasattr(db_response, 'error') and db_response.error:
-            print(f"❌ Database error: {db_response.error}")
-            raise HTTPException(status_code=500, detail="Failed to save analysis to database")
-        
-        print("✅ Analysis saved to database successfully")
+        # Upload to Supabase Storage
+        target_url = None
+        if supabase_client:
+            try:
+                logger.info("☁️ Uploading to Supabase Storage...")
+                
+                with open(pattern_path, "rb") as pattern_file:
+                    pattern_data = pattern_file.read()
+                    pattern_storage_path = f"{user_id}/{analysis_id}_pattern{pattern_ext}"
+                    supabase_client.storage.from_("audio-analysis-files").upload(
+                        pattern_storage_path,
+                        pattern_data
+                    )
+                
+                with open(target_path, "rb") as target_file:
+                    target_data = target_file.read()
+                    target_storage_path = f"{user_id}/{analysis_id}_target{target_ext}"
+                    supabase_client.storage.from_("audio-analysis-files").upload(
+                        target_storage_path,
+                        target_data
+                    )
+                    target_url = supabase_client.storage.from_("audio-analysis-files").get_public_url(target_storage_path)
+                
+                # Store in database
+                logger.info("💾 Saving analysis to database...")
+                analysis_data = {
+                    "user_id": user_id,
+                    "analysis_id": analysis_id,
+                    "pattern_filename": pattern.filename,
+                    "target_filename": target.filename,
+                    "pattern_url": f"{user_id}/{analysis_id}_pattern{pattern_ext}",
+                    "target_url": target_url,
+                    "detection_count": results["detection_count"],
+                    "detections": results["detections"],
+                    "pattern_duration": results["pattern_duration"],
+                    "target_duration": results["target_duration"],
+                    "sample_rate": results["sample_rate"],
+                    "waveform_data": results["waveform_data"],
+                    "correlation_data": results["correlation_data"],
+                    "analysis_methods": results.get("analysis_methods", ["correlation"])
+                }
+                
+                db_response = supabase_client.table("audio_analysis").insert(analysis_data).execute()
+                
+                if hasattr(db_response, 'error') and db_response.error:
+                    logger.error(f"Database error: {db_response.error}")
+                else:
+                    logger.info("✅ Analysis saved to database successfully")
+                    
+            except Exception as e:
+                logger.error(f"❌ Supabase operation failed: {e}")
+                # Continue without Supabase storage
+                target_url = None
         
         return {
             "analysis_id": analysis_id,
@@ -151,25 +181,29 @@ async def analyze_audio(
             "waveform_data": results["waveform_data"],
             "correlation_data": results["correlation_data"],
             "analysis_methods": results.get("analysis_methods", ["correlation"]),
-            "target_url": target_url,  # ADD THIS for frontend audio player
-            "result_file": f"supabase:{analysis_id}"
+            "target_url": target_url
         }
         
     except Exception as e:
-        print(f"❌ Error in analysis: {str(e)}")
+        logger.error(f"❌ Analysis error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
     finally:
         # Cleanup temporary files
-        if pattern_path and os.path.exists(pattern_path):
-            os.remove(pattern_path)
-        if target_path and os.path.exists(target_path):
-            os.remove(target_path)
+        for file_path in [pattern_path, target_path]:
+            if file_path and os.path.exists(file_path):
+                try:
+                    os.remove(file_path)
+                except Exception as e:
+                    logger.warning(f"Could not remove temporary file {file_path}: {e}")
 
-# Serve audio files from Supabase (redirect to public URL)
+# Audio file endpoint
 @app.get("/api/audio/{analysis_id}")
 async def get_audio_file(analysis_id: str):
     """Get audio file URL from database"""
     try:
+        if not supabase_client:
+            raise HTTPException(status_code=500, detail="Storage service unavailable")
+            
         # Get analysis record from database
         response = supabase_client.table("audio_analysis").select("target_url").eq("analysis_id", analysis_id).execute()
         
@@ -178,15 +212,27 @@ async def get_audio_file(analysis_id: str):
         
         target_url = response.data[0]["target_url"]
         
+        if not target_url:
+            raise HTTPException(status_code=404, detail="Audio file not found")
+        
         # Redirect to the actual Supabase URL
         return RedirectResponse(url=target_url)
         
     except Exception as e:
+        logger.error(f"Audio file error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Health check endpoint for monitoring
 @app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "environment": ENVIRONMENT,
+        "supabase_connected": supabase_client is not None,
+        "port": PORT
+    }
+    return status
 
 @app.get("/api/docs")
 async def get_docs():
@@ -202,3 +248,7 @@ async def get_docs():
         "file_limits": "Maximum 50MB per file",
         "supported_formats": ["mp3", "wav", "ogg", "m4a", "aac", "flac"]
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
