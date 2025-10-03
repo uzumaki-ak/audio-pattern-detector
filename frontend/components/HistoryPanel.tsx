@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "../lib/supabase";
-import { AnalysisResult } from "types";
+import { AnalysisResult } from "@/types";
 
 interface AnalysisHistory {
   id: string;

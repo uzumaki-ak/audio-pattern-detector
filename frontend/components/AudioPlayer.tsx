@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Detection } from "types";
+import { Detection } from "@/types";
 
 interface AudioPlayerProps {
   targetFilename: string;

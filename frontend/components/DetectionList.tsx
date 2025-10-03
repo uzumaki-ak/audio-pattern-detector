@@ -1,4 +1,4 @@
-import { Detection } from "types";
+import { Detection } from "@/types";
 
 interface Props {
   detections: Detection[];

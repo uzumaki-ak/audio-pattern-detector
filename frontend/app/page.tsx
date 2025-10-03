@@ -4,11 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import FileUpload from "../components/FileUpload";
 import ResultsDisplay from "../components/ResultsDisplay";
 import { analyzeAudio, testConnection } from "../lib/api";
-import { AnalysisResult } from "types";
-import ThemeToggle from "components/ThemeToggle";
-import Auth from "components/Auth";
-import UserMenu from "components/UserMenu";
-import HistoryPanel from "components/HistoryPanel";
+import { AnalysisResult } from "@/types";
+import ThemeToggle from "../components/ThemeToggle";
+import Auth from "../components/Auth";
+import UserMenu from "../components/UserMenu";
+import HistoryPanel from "../components/HistoryPanel";
 import { createClient } from "../lib/supabase";
 import type { User } from "@supabase/supabase-js";
 

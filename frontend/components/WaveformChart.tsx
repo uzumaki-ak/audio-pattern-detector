@@ -1,5 +1,5 @@
 "use client";
-import { Detection } from "types";
+import { Detection } from "@/types";
 import { useEffect, useRef } from "react";
 
 interface Props {

@@ -1,4 +1,4 @@
-import { AnalysisResult } from "types";
+import { AnalysisResult } from "@/types";
 import WaveformChart from "./WaveformChart";
 import CorrelationChart from "./CorrelationChart";
 import DetectionList from "./DetectionList";
