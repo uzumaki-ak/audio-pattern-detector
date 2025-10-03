@@ -54,7 +54,6 @@ export default function ResultsDisplay({
           ))}
         </div>
       </div>
-
       {/* Stats Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div
@@ -106,15 +105,15 @@ export default function ResultsDisplay({
           <div className="text-xs text-foreground/80">Sample Rate</div>
         </div>
       </div>
-
       {/* Audio Player */}
+      {/* // In the AudioPlayer section, add targetUrl prop: */}
       <AudioPlayer
         targetFilename={results.target_filename}
         detections={results.detections}
         analysisId={results.analysis_id}
         isDark={isDark}
+        targetUrl={results.target_url} // ADD THIS LINE
       />
-
       {/* Download Button */}
       <button
         onClick={downloadResults}
@@ -126,7 +125,6 @@ export default function ResultsDisplay({
       >
         Download Full Results (JSON)
       </button>
-
       {/* Charts */}
       <WaveformChart
         data={results.waveform_data}
@@ -136,7 +134,6 @@ export default function ResultsDisplay({
         isDark={isDark}
       />
       <CorrelationChart data={results.correlation_data} isDark={isDark} />
-
       {/* Detection List */}
       <DetectionList detections={results.detections} isDark={isDark} />
     </div>

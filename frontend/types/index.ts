@@ -19,4 +19,5 @@ export interface AnalysisResult {
   correlation_data: number[];
   analysis_methods?: string[];
   result_file: string;
+    target_url?: string;
 }

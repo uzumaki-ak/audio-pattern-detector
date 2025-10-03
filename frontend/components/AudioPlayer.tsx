@@ -8,6 +8,7 @@ interface AudioPlayerProps {
   detections: Detection[];
   analysisId: string;
   isDark: boolean;
+  targetUrl?: string;
 }
 
 export default function AudioPlayer({
@@ -15,6 +16,7 @@ export default function AudioPlayer({
   detections,
   analysisId,
   isDark,
+  targetUrl,
 }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -82,6 +84,9 @@ export default function AudioPlayer({
       setCurrentTime(time);
     }
   };
+
+  // Use targetUrl if available, otherwise fall back to API endpoint
+  const audioSrc = targetUrl || `${API_URL}/api/audio/${analysisId}`;
 
   return (
     <div
@@ -151,22 +156,18 @@ export default function AudioPlayer({
             : "bg-white border-stone-300"
         }`}
       >
-        <audio
-          ref={audioRef}
-          src={`${API_URL}/api/audio/${analysisId}`}
-          className="hidden"
-        />
+        <audio ref={audioRef} src={audioSrc} className="hidden" />
 
-        <div className="flex items-center gap-3 mb-3 ">
+        <div className="flex items-center gap-3 mb-3">
           <button
             onClick={togglePlay}
-            className={`px-3 py-2 rounded-l-xl flex items-center justify-center transition-all border ${
+            className={`px-3 py-2 rounded flex items-center justify-center transition-all border ${
               isDark
                 ? "bg-amber-600 hover:bg-amber-700 border-amber-700 text-white"
                 : "bg-amber-500 hover:bg-amber-600 border-amber-600 text-white"
             }`}
           >
-            {isPlaying ? "Pause" : "Play"}
+            {isPlaying ? "⏸️ Pause" : "▶️ Play"}
           </button>
 
           <div className="flex-1">
