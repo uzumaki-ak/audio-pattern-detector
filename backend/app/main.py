@@ -8,6 +8,7 @@ from app.audio_processor import AudioProcessor
 import supabase
 from dotenv import load_dotenv
 import logging
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -28,12 +29,15 @@ PORT = int(os.getenv("PORT", 8000))
 # Supabase client initialization
 try:
     supabase_client = supabase.create_client(
-        os.getenv("SUPABASE_URL"),
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        supabase_url=os.getenv("SUPABASE_URL"),
+        supabase_key=os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     )
+    # Test the connection
+    supabase_client.table("audio_analysis").select("count", count="exact").limit(1).execute()
     logger.info("✅ Supabase client initialized successfully")
 except Exception as e:
     logger.error(f"❌ Failed to initialize Supabase client: {e}")
+    logger.error(f"Full error: {traceback.format_exc()}")
     supabase_client = None
 
 # CORS Configuration - get from environment
@@ -116,26 +120,41 @@ async def analyze_audio(
         
         # Upload to Supabase Storage
         target_url = None
+        pattern_url = None
+        
         if supabase_client:
             try:
                 logger.info("☁️ Uploading to Supabase Storage...")
                 
+                # Upload pattern file
                 with open(pattern_path, "rb") as pattern_file:
                     pattern_data = pattern_file.read()
                     pattern_storage_path = f"{user_id}/{analysis_id}_pattern{pattern_ext}"
-                    supabase_client.storage.from_("audio-analysis-files").upload(
+                    
+                    upload_response = supabase_client.storage.from_("audio-analysis-files").upload(
                         pattern_storage_path,
                         pattern_data
                     )
+                    logger.info(f"Pattern upload response: {upload_response}")
+                    
+                    # Get public URL for pattern
+                    pattern_url = supabase_client.storage.from_("audio-analysis-files").get_public_url(pattern_storage_path)
+                    logger.info(f"Pattern URL: {pattern_url}")
                 
+                # Upload target file
                 with open(target_path, "rb") as target_file:
                     target_data = target_file.read()
                     target_storage_path = f"{user_id}/{analysis_id}_target{target_ext}"
-                    supabase_client.storage.from_("audio-analysis-files").upload(
+                    
+                    upload_response = supabase_client.storage.from_("audio-analysis-files").upload(
                         target_storage_path,
                         target_data
                     )
+                    logger.info(f"Target upload response: {upload_response}")
+                    
+                    # Get public URL for target
                     target_url = supabase_client.storage.from_("audio-analysis-files").get_public_url(target_storage_path)
+                    logger.info(f"Target URL: {target_url}")
                 
                 # Store in database
                 logger.info("💾 Saving analysis to database...")
@@ -144,7 +163,7 @@ async def analyze_audio(
                     "analysis_id": analysis_id,
                     "pattern_filename": pattern.filename,
                     "target_filename": target.filename,
-                    "pattern_url": f"{user_id}/{analysis_id}_pattern{pattern_ext}",
+                    "pattern_url": pattern_url,
                     "target_url": target_url,
                     "detection_count": results["detection_count"],
                     "detections": results["detections"],
@@ -153,20 +172,24 @@ async def analyze_audio(
                     "sample_rate": results["sample_rate"],
                     "waveform_data": results["waveform_data"],
                     "correlation_data": results["correlation_data"],
-                    "analysis_methods": results.get("analysis_methods", ["correlation"])
+                    "analysis_methods": results.get("analysis_methods", ["correlation"]),
+                    "created_at": datetime.now().isoformat()
                 }
                 
                 db_response = supabase_client.table("audio_analysis").insert(analysis_data).execute()
                 
                 if hasattr(db_response, 'error') and db_response.error:
                     logger.error(f"Database error: {db_response.error}")
+                    raise Exception(f"Database insert failed: {db_response.error}")
                 else:
                     logger.info("✅ Analysis saved to database successfully")
                     
             except Exception as e:
                 logger.error(f"❌ Supabase operation failed: {e}")
-                # Continue without Supabase storage
+                logger.error(f"Full Supabase error: {traceback.format_exc()}")
+                # Continue without Supabase storage but don't save to database
                 target_url = None
+                pattern_url = None
         
         return {
             "analysis_id": analysis_id,
@@ -181,11 +204,14 @@ async def analyze_audio(
             "waveform_data": results["waveform_data"],
             "correlation_data": results["correlation_data"],
             "analysis_methods": results.get("analysis_methods", ["correlation"]),
-            "target_url": target_url
+            "target_url": target_url,
+            "pattern_url": pattern_url,
+            "supabase_saved": supabase_client is not None and target_url is not None
         }
         
     except Exception as e:
         logger.error(f"❌ Analysis error: {str(e)}")
+        logger.error(f"Full analysis error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
     finally:
         # Cleanup temporary files
@@ -220,16 +246,27 @@ async def get_audio_file(analysis_id: str):
         
     except Exception as e:
         logger.error(f"Audio file error: {e}")
+        logger.error(f"Full audio file error: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Health check endpoint for monitoring
 @app.get("/api/health")
 async def health_check():
+    # Test Supabase connection
+    supabase_status = False
+    if supabase_client:
+        try:
+            # Simple query to test connection
+            supabase_client.table("audio_analysis").select("count", count="exact").limit(1).execute()
+            supabase_status = True
+        except Exception as e:
+            logger.warning(f"Supabase health check failed: {e}")
+    
     status = {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "environment": ENVIRONMENT,
-        "supabase_connected": supabase_client is not None,
+        "supabase_connected": supabase_status,
         "port": PORT
     }
     return status
