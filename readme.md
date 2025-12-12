@@ -1,5 +1,5 @@
 An end-to-end system for detecting audio patterns in target recordings using advanced signal processing and visualization.
-
+#demo video: https://youtu.be/6W6wjV44Yfw
 This project has two parts:
 
 Backend (FastAPI + Librosa + NumPy) → Handles audio processing and pattern detection.
